@@ -1,0 +1,72 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Contest Portal</title>
+<style>
+:root{--bg:#f6f7fb;--c:#fff;--t:#1b1f2a;--p:#4f46e5;--b:#e3e6ef}
+@media(prefers-color-scheme:dark){:root{--bg:#12141c;--c:#1b1e29;--t:#e8eaf2;--b:#2c3040}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+.w{max-width:900px;margin:auto;padding:16px}.card{background:var(--c);border:1px solid var(--b);border-radius:10px;padding:16px;margin:12px 0}
+input,select,textarea,button{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--b);background:var(--c);color:var(--t);width:100%;margin:4px 0}
+button{width:auto;background:var(--p);color:#fff;border:0;cursor:pointer;margin-right:6px}button.g{background:none;color:var(--t);border:1px solid var(--b)}button.r{background:#dc2626}
+textarea{font-family:monospace;min-height:160px}table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid var(--b);text-align:left}
+.bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}.err{color:#dc2626}.ok{color:#16a34a}pre{background:var(--bg);padding:8px;border-radius:8px;white-space:pre-wrap}
+.nosel{user-select:none;-webkit-user-select:none}.nosel textarea{user-select:text}
+</style>
+<div class=w id=app></div>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const api=async(p,b,m)=>{const r=await fetch('/api/'+p,{method:m||(b?'POST':'GET'),headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):void 0});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.e||'Error');return j};
+let S,tab='apt',started=false,off=0,LB=[],R;
+const msg=(id,t,ok)=>{const e=$('#'+id);if(e)e.innerHTML=`<span class="${ok?'ok':'err'}">${esc(t)}</span>`};
+async function load(){try{S=await api('state');off=S.now-Date.now()}catch(e){S=null}draw()}
+function draw(){const a=$('#app');document.body.classList.toggle('nosel',!!S&&S.u.role==='student');
+ if(!S){a.innerHTML=`<div class=card><h2>Contest Portal</h2><input id=l placeholder="Email (admin: username)"><input id=p type=password placeholder=Password>
+ <input id=n placeholder="Name (register mattum)"><button onclick=login()>Login</button><button class=g onclick=reg()>Register (Student)</button><div id=m></div></div>`;return}
+ if(S.u.role==='admin')return adminDraw();
+ const top=`<div class="bar card"><b>${esc(S.u.name)}</b><span id=clk></span><button class=g onclick=out()>Logout</button></div>`;
+ if(S.u.closed)return a.innerHTML=top+`<div class=card><h2 class=err>Un attempt close aagiduchu</h2><p>Reason: ${esc(S.u.reason||'Rule violation')}. Admin-ku inform aagiduchu.</p></div>`+lbHtml();
+ if(!started)return a.innerHTML=top+`<div class=card><h3>Rules & Instructions</h3><pre>${esc(S.rules||'Admin innum rules add pannala.')}</pre>
+ <p class=err>Test start pannina: tab maaruna / window veliya poona / fullscreen exit panna ungal attempt udane close aagum. Copy-paste allowed illa. Oru question-ku oru submission mattum.</p>
+ <button onclick=start()>Start Test</button><div id=m></div></div>`+lbHtml();
+ a.innerHTML=top+`<div class=card><button class="${tab=='apt'?'':'g'}" onclick="tab='apt';draw()">Aptitude</button><button class="${tab=='code'?'':'g'}" onclick="tab='code';draw()">Coding</button><button class="${tab=='lb'?'':'g'}" onclick="lb()">Leaderboard</button></div>`+(tab=='lb'?lbHtml():S.qs.filter(x=>x.type==tab).map(qHtml).join('')||'<div class=card>Questions illa</div>');tick()}
+const done=id=>S.subs.find(x=>x.qid===id);
+function qHtml(x){const d=done(x.id);let h=`<div class=card><b>${esc(x.title)}</b> <small>(${x.points} pts)</small><p>${esc(x.body)}</p>`;
+ if(d)return h+`<span class=ok>Submitted ✔ Score: ${d.score}</span></div>`;
+ if(x.type=='apt')h+=x.options.map(o=>`<label><input type=radio name=q${x.id} value="${esc(o)}" style="width:auto"> ${esc(o)}</label><br>`).join('')+`<button onclick=sub(${x.id})>Submit</button>`;
+ else h+=(x.sample?`<small>Sample input: <code>${esc(x.sample.input)}</code> → output: <code>${esc(x.sample.output)}</code></small>`:'')+`<select id=l${x.id}><option value=py>Python</option><option value=js>JavaScript (Node)</option></select><textarea id=c${x.id} spellcheck=false placeholder="stdin-la irundhu read pannunga, stdout-la print pannunga"></textarea>
+ <button class=g onclick=runq(${x.id})>Run (sample test)</button><button onclick=sub(${x.id})>Submit</button><pre id=o${x.id}></pre>`;return h+`<div id=r${x.id}></div></div>`}
+async function runq(id){const o=$('#o'+id);o.textContent='Running...';try{const r=await api('run',{qid:id,code:$('#c'+id).value,lang:$('#l'+id).value});o.textContent=r.res.map(t=>(t.ok?'✔ PASS':'✘ FAIL')+'\nOutput: '+t.out+(t.err?'\nError: '+t.err:'')).join('\n')}catch(e){o.textContent=e.message}}
+async function sub(id){const x=S.qs.find(q=>q.id===id);let b={qid:id};
+ if(x.type=='apt'){const c=document.querySelector(`input[name=q${id}]:checked`);if(!c)return msg('r'+id,'Option select pannunga');b.answer=c.value}else{b.answer=$('#c'+id).value;b.lang=$('#l'+id).value;if(!b.answer.trim())return msg('r'+id,'Code ezhudhunga')}
+ try{await api('submit',b);await load()}catch(e){msg('r'+id,e.message)}}
+const lbHtml=()=>`<div class=card><h3>Leaderboard</h3><table><tr><th>Rank<th>Name<th>Score</tr>${LB.map((r,i)=>`<tr><td>${i+1}<td>${esc(r.name)}${r.closed?' ⛔':''}<td>${r.score}</tr>`).join('')}</table></div>`;
+async function lb(){tab='lb';LB=await api('leaderboard');draw()}
+function start(){if(!S.end||S.now+0>S.end||Date.now()+off>S.end)return msg('m','Contest ippo active illa');
+ (document.documentElement.requestFullscreen||(()=>Promise.resolve())).call(document.documentElement).catch(()=>{}).finally(()=>{started=true;draw()})}
+function tick(){const e=$('#clk');if(!e)return;const l=S.end-(Date.now()+off);e.textContent=!S.end?'Contest not started':l<=0?'Contest ended':`Time left: ${Math.floor(l/864e5)}d ${Math.floor(l%864e5/36e5)}h ${Math.floor(l%36e5/6e4)}m ${Math.floor(l%6e4/1e3)}s`}
+setInterval(tick,1000);
+// ---- anti-cheat
+function viol(r){if(!started||!S||S.u.role!=='student'||S.u.closed)return;started=false;S.u.closed=1;S.u.reason=r;api('violation',{r}).catch(()=>{});if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});draw()}
+document.addEventListener('visibilitychange',()=>document.hidden&&viol('Tab switch / minimize'));
+addEventListener('blur',()=>viol('Window focus lost'));
+document.addEventListener('fullscreenchange',()=>!document.fullscreenElement&&viol('Exited fullscreen'));
+['copy','cut','paste','contextmenu','dragstart','drop'].forEach(ev=>document.addEventListener(ev,e=>{if(S&&S.u.role==='student'){e.preventDefault()}}));
+document.addEventListener('keydown',e=>{if(S&&S.u.role==='student'&&((e.ctrlKey||e.metaKey)&&'cvxaup'.includes(e.key.toLowerCase())&&!(e.key=='a')||e.key=='F12'||e.key=='PrintScreen'))e.preventDefault()});
+// ---- auth
+async function login(){try{await api('login',{login:$('#l').value,password:$('#p').value});await load()}catch(e){msg('m',e.message)}}
+async function reg(){try{await api('register',{email:$('#l').value,name:$('#n').value,password:$('#p').value});msg('m','Registered! Ippo login pannunga',1)}catch(e){msg('m',e.message)}}
+async function out(){await api('logout',{});started=false;S=null;draw()}
+// ---- admin
+async function adminDraw(){R=await api('admin/report');const e=R.end?new Date(R.end).toLocaleString():'Not started';
+ $('#app').innerHTML=`<div class="bar card"><b>Admin: ${esc(S.u.name)}</b><button class=g onclick=out()>Logout</button></div>
+ <div class=card><h3>Contest Settings</h3>Ends: <b>${e}</b><br><input id=days type=number value=6 style="width:100px"> days <button onclick="set({days:+$('#days').value})">Start / Restart Timer</button>
+ <textarea id=rules placeholder="Rules & instructions (students-ku theriyum)">${esc(R.rules)}</textarea><button onclick="set({rules:$('#rules').value})">Save Rules</button></div>
+ <div class=card><h3>Add Question (weekly change pannalam)</h3><select id=t onchange=tg()><option value=apt>Aptitude</option><option value=code>Coding</option></select>
+ <input id=ti placeholder=Title><textarea id=bo style="min-height:70px" placeholder=Question></textarea><input id=op placeholder="Options (comma separated) - aptitude"><input id=an placeholder="Correct answer (option text exact) - aptitude">
+ <input id=pt type=number value=10 placeholder=Points><textarea id=te style="min-height:70px" placeholder='Coding test cases JSON: [{"input":"2 3","output":"5"},{"input":"10 20","output":"30"}]'></textarea><button onclick=addq()>Add</button><div id=m></div></div>
+ <div class=card><h3>Active Questions</h3><table>${R.qs.map(q=>`<tr><td>${q.type}<td>${esc(q.title)}<td>${q.points}<td><button class=r onclick=dq(${q.id})>Remove</button></tr>`).join('')}</table></div>
+ <div class=card><h3>⚠ Fraud / Closed Attempts</h3><table><tr><th>Name<th>Email<th>Reason<th></tr>${R.users.filter(u=>u.closed).map(u=>`<tr><td>${esc(u.name)}<td>${esc(u.email)}<td class=err>${esc(u.reason)}<td><button class=g onclick=reopen(${u.id})>Reopen</button></tr>`).join('')||'<tr><td colspan=4>None</tr>'}</table></div>
+ <div class=card><h3>Copy-match (same code) flags</h3><table>${R.flags.map(f=>`<tr><td>${esc(f.name)}<td>${esc(f.email)}<td>Q${f.qid}<td class=err>${esc(f.flag)}</tr>`).join('')||'<tr><td>None</tr>'}</table></div>
+ <div class=card><h3>Violation Log</h3><table>${R.logs.map(l=>`<tr><td>${esc(l.name)}<td>${esc(l.msg)}<td>${new Date(l.at).toLocaleString()}</tr>`).join('')||'<tr><td>None</tr>'}</table></div>`+(LB=await api('leaderboard'),lbHtml())}
+const set=async b=>{await api('admin/settings',b);adminDraw()},dq=async i=>{await api('admin/question/'+i,0,'DELETE');adminDraw()},reopen=async i=>{await api('admin/reopen/'+i,{});adminDraw()};
+async function addq(){try{await api('admin/question',{type:$('#t').value,title:$('#ti').value,body:$('#bo').value,options:$('#op').value,answer:$('#an').value,points:$('#pt').value,tests:$('#te').value});adminDraw()}catch(e){msg('m',e.message)}}
+load();
+</script>
